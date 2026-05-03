@@ -425,3 +425,76 @@ Cuối cùng, một thông báo lỗi màu đỏ xuất hiện: "Maximum stored 
 - Tính nguy hiểm: Tình trạng này được gọi là Indirect Recursion (Đệ quy gián tiếp). Nó cực kỳ nguy hiểm vì có thể gây treo hệ thống hoặc làm sai lệch dữ liệu hàng loạt nếu không có giới hạn 32 tầng của SQL Server.
 
 - Kinh nghiệm thiết kế: Khi viết Trigger, tuyệt đối tránh việc cập nhật chéo giữa các bảng theo vòng tròn. Nếu cần cập nhật nhiều bảng, nên sử dụng Store Procedure để kiểm soát luồng dữ liệu thay vì dùng Trigger chồng chéo.
+
+### Phần 5: Cursor và Duyệt dữ liệu
+
+#### Sử dụng CURSOR để xử lý từng bản ghi
+Bài toán: Duyệt qua danh sách khách hàng. Nếu điểm tích lũy > 15 thì in ra thông báo tặng voucher 50k, ngược lại in ra thông báo tặng voucher 20k.
+```sql
+USE [QuanLySanBong_K235480106052];
+GO
+
+-- Khai báo các biến để chứa dữ liệu từng dòng
+DECLARE @TenKH NVARCHAR(100);
+DECLARE @Diem INT;
+
+-- 1. Khai báo Cursor
+DECLARE cur_Voucher  CURSOR FOR 
+SELECT [HoTenKhachHang], [DiemTichLuy] FROM [KhachHang];
+
+-- 2. Mở Cursor
+OPEN cur_Voucher;
+
+-- 3. Đọc dòng đầu tiên
+FETCH NEXT FROM cur_Voucher INTO @TenKH, @Diem;
+
+-- 4. Vòng lặp duyệt qua từng dòng
+WHILE @@FETCH_STATUS = 0
+BEGIN
+    IF @Diem > 15
+        PRINT N'Khách hàng ' + @TenKH + N': Tặng Voucher 50k (Điểm: ' + CAST(@Diem AS VARCHAR) + ')';
+    ELSE
+        PRINT N'Khách hàng ' + @TenKH + N': Tặng Voucher 20k (Điểm: ' + CAST(@Diem AS VARCHAR) + ')';
+
+    -- Đọc dòng tiếp theo
+    FETCH NEXT FROM cur_Voucher INTO @TenKH, @Diem;
+END;
+
+-- 5. Đóng và giải phóng Cursor
+CLOSE cur_Voucher;
+DEALLOCATE cur_Voucher;
+```
+<img width="960" height="600" alt="image" src="https://github.com/user-attachments/assets/8ccd63a1-5e73-497e-a826-e8f5d605f211" />
+
+#### Giải quyết không dùng CURSOR (Set-based)
+Trong SQL, hầu hết các bài toán in ấn hoặc cập nhật đều có thể dùng SELECT hoặc UPDATE trực tiếp với CASE WHEN.
+```sql
+SELECT [HoTenKhachHang], 
+       CASE 
+            WHEN [DiemTichLuy] > 15 THEN N'Tặng Voucher 50k'
+            ELSE N'Tặng Voucher 20k'
+       END AS LoaiVoucher
+FROM [KhachHang];
+```
+
+<img width="960" height="600" alt="image" src="https://github.com/user-attachments/assets/ea30d841-0db1-42e1-af9b-a80f0c1febed" />
+
+#### So sánh tốc độ (Performance):
+
+- Có Cursor: SQL Server phải khởi tạo bộ nhớ, mở con trỏ, duyệt từng dòng, thực hiện lệnh in, rồi lại lặp. Với 1 triệu dòng, Cursor sẽ cực kỳ chậm.
+
+- Không dùng Cursor: SQL Server tối ưu hóa câu lệnh trên toàn bộ tập dữ liệu cùng lúc. Tốc độ thực thi luôn nhanh hơn gấp nhiều lần so với Cursor.
+
+### Bài toán "Chỉ Cursor mới giải quyết được" (hoặc SQL cực khó giải quyết)
+Thông thường, SQL rất mạnh về tính toán tập hợp, nhưng sẽ "bó tay" hoặc cực kỳ phức tạp với bài toán Cộng dồn lũy kế (Running Total) phức tạp có điều kiện dừng.
+
+- Ví dụ: Bài toán "Trả nợ hóa đơn ưu tiên".
+Giả sử một khách hàng nợ 5 hóa đơn với số tiền khác nhau. Hôm nay khách đưa 1.000.000đ. Hệ thống phải duyệt từng hóa đơn từ cũ nhất đến mới nhất:
+
+Lấy hóa đơn 1 ra, trừ tiền, nếu còn dư tiền thì sang hóa đơn 2.
+
+Nếu hóa đơn 2 trừ xong mà hết tiền thì dừng lại, không duyệt hóa đơn 3, 4, 5 nữa.
+
+### Tại sao SQL khó giải quyết?
+Câu lệnh UPDATE thông thường sẽ tác động lên tất cả các dòng cùng lúc. Để "biết" khi nào thì tiền mặt đã hết để dừng lại không cập nhật các dòng tiếp theo là một logic tuần tự (Procedural). Mặc dù SQL hiện đại có Window Functions để tính lũy kế, nhưng để thực hiện các hành động phức tạp như "dừng lại đúng lúc" hoặc "gọi một API bên ngoài cho mỗi dòng" thì Cursor vẫn là lựa chọn duy nhất hoặc dễ dàng nhất.
+
