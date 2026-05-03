@@ -115,8 +115,8 @@ FROM [SanBong];
 
 <img width="959" height="600" alt="image" src="https://github.com/user-attachments/assets/08d79a8a-7b18-4923-b3ec-837df9bcea47" />
 
-####  Tìm hiểu về User-Defined Functions (UDF - Hàm tự định nghĩa)
-## Mục đích và Phân loại Hàm (UDF)
+###  Tìm hiểu về User-Defined Functions (UDF - Hàm tự định nghĩa)
+### Mục đích và Phân loại Hàm (UDF)
 
 Hàm do người dùng tự viết dùng để đóng gói các logic tính toán lặp đi lặp lại, giúp mã SQL gọn gàng và dễ bảo trì hơn.
 
@@ -229,3 +229,199 @@ GO
 SELECT * FROM dbo.fn_PhanHangKhachHang();
 ```
 <img width="960" height="600" alt="image" src="https://github.com/user-attachments/assets/a75ad66e-b8d5-4e0a-b33a-2428f350e973" />
+
+
+### Phần 3: Xây dựng Store Procedure
+
+#### Tìm hiểu về System Store Procedure (SP có sẵn)
+Trong SQL Server, các System SP thường bắt đầu bằng tiền tố sp_ và được lưu trong database master. Chúng giúp quản trị viên kiểm tra hệ thống cực nhanh.
+
+Một vài System SP đặc sắc:
+- sp_help: Cung cấp thông tin chi tiết về bất kỳ đối tượng nào (bảng, view, index).
+
+Cách dùng: EXEC sp_help 'SanBong'; -> Nó sẽ hiện ra bảng này có những cột nào, kiểu dữ liệu gì, khóa chính là ai.
+
+- sp_helpdb: Liệt kê danh sách các database đang có và dung lượng của chúng.
+
+Cách dùng: EXEC sp_helpdb;
+
+- sp_rename: Dùng để đổi tên một đối tượng (như đổi tên bảng hoặc tên cột) mà không cần xóa đi tạo lại.
+
+Cách dùng: EXEC sp_rename 'TenCu', 'TenMoi';
+Thực hành viết Store Procedure
+#### SP Thêm mới Sân Bóng (Có kiểm tra logic)
+Yêu cầu: Tạo SP để thêm sân mới. Nếu giá thuê nhỏ hơn hoặc bằng 0 thì không cho thêm và báo lỗi.
+```sql
+GO
+CREATE PROCEDURE sp_ThemSanBong (
+    @TenSan NVARCHAR(100),
+    @LoaiSan NVARCHAR(20),
+    @GiaThue DECIMAL(18,2)
+)
+AS
+BEGIN
+    -- Kiểm tra logic: Giá thuê phải > 0
+    IF (@GiaThue <= 0)
+    BEGIN
+        PRINT N'Lỗi: Giá thuê sân phải lớn hơn 0!';
+    END
+    ELSE
+    BEGIN
+        INSERT INTO [SanBong] ([TenSanBong], [LoaiSan], [GiaThueTheoGio])
+        VALUES (@TenSan, @LoaiSan, @GiaThue);
+        PRINT N'Thêm sân bóng thành công!';
+    END
+END;
+GO
+
+-- KHAI THÁC (Thử trường hợp đúng):
+EXEC sp_ThemSanBong N'Sân Old Trafford', N'Sân 11', 500000;
+```
+
+<img width="960" height="600" alt="image" src="https://github.com/user-attachments/assets/f511b268-67c6-442b-83ae-0d9386f498a8" />
+
+#### SP Sử dụng tham số OUTPUT
+Yêu cầu: Đếm xem một khách hàng (theo mã) đã đặt sân bao nhiêu lần. Giá trị số lần đặt trả về qua tham số OUTPUT.
+
+```sql
+GO
+CREATE PROCEDURE sp_DemSoLanDatSan (
+    @MaKH INT,
+    @SoLanDat INT OUTPUT -- Tham số trả kết quả ra ngoài
+)
+AS
+BEGIN
+    SELECT @SoLanDat = COUNT(*) 
+    FROM [PhieuDatSan] 
+    WHERE [MaKhachHang] = @MaKH;
+END;
+GO
+
+-- KHAI THÁC:
+DECLARE @Result INT;
+EXEC sp_DemSoLanDatSan @MaKH = 1, @SoLanDat = @Result OUTPUT;
+SELECT N'Số lần khách hàng 1 đã đặt sân là: ' + CAST(@Result AS NVARCHAR);
+```
+
+<img width="960" height="600" alt="image" src="https://github.com/user-attachments/assets/6f14774a-3ab5-42fd-96e9-ac8abd6dfa70" />
+
+#### SP Trả về tập kết quả (Result Set) Join nhiều bảng
+Yêu cầu: Xuất ra "Hóa đơn chi tiết" bao gồm: Tên khách hàng, Tên sân đã đặt, và Ngày đặt.
+```sql
+GO
+CREATE PROCEDURE sp_LayChiTietDatSan
+AS
+BEGIN
+    SELECT 
+        K.[HoTenKhachHang] AS [TenKhach],
+        S.[TenSanBong] AS [TenSan],
+        P.[NgayDat] AS [NgayDatSan],
+        S.[LoaiSan]
+    FROM [PhieuDatSan] P
+    INNER JOIN [KhachHang] K ON P.[MaKhachHang] = K.[MaKhachHang]
+    INNER JOIN [SanBong] S ON P.[MaSanBong] = S.[MaSanBong]
+    ORDER BY P.[NgayDat] DESC;
+END;
+GO
+
+-- KHAI THÁC:
+EXEC sp_LayChiTietDatSan;
+```
+
+<img width="960" height="600" alt="image" src="https://github.com/user-attachments/assets/617c3d03-7d4e-4be3-81e3-b5f3121e42af" />
+
+
+### Phần 4: Trigger và Xử lý logic nghiệp vụ
+
+- Viết 01 Trigger xử lý logic thực tế
+Kịch bản: Khi một anh em đặt sân bóng mới (INSERT vào bảng PhieuDatSan), hệ thống sẽ tự động cộng 5 điểm thưởng cho khách hàng đó vào bảng KhachHang. Điều này giúp quản lý điểm tích lũy hoàn toàn tự động.
+
+```sql
+GO
+CREATE TRIGGER trg_CapNhatDiemTichLuy
+ON [PhieuDatSan]
+AFTER INSERT
+AS
+BEGIN
+    -- Lấy MaKhachHang từ dòng vừa được chèn vào (bảng virtual inserted)
+    UPDATE [KhachHang]
+    SET [DiemTichLuy] = [DiemTichLuy] + 5
+    FROM [KhachHang] K
+    JOIN inserted i ON K.[MaKhachHang] = i.[MaKhachHang];
+    
+    PRINT N'Hệ thống: Đã tự động cộng 5 điểm thưởng cho khách hàng!';
+END;
+GO
+
+-- KHAI THÁC (Thử đặt 1 sân mới):
+INSERT INTO [PhieuDatSan] ([MaSanBong], [MaKhachHang], [SoGioThue])
+VALUES (1, 1, 1.5);
+
+-- Kiểm tra điểm khách hàng đã tăng chưa
+SELECT * FROM [KhachHang] WHERE [MaKhachHang] = 1;
+```
+
+<img width="960" height="600" alt="image" src="https://github.com/user-attachments/assets/cffd8d24-a124-42bd-a880-4d222ad6d045" />
+
+- Thử nghiệm Trigger vòng lặp (Recursion Trigger)
+Đây là phần thí nghiệm để bạn quan sát lỗi hệ thống. Chúng ta sẽ tạo ra một tình huống: "A gọi B, B gọi lại A".
+
+**Bước A**: Tạo Trigger trên bảng KhachHang (Cập nhật sang SanBong)
+```sql
+GO
+CREATE TRIGGER trg_KhachHang_To_SanBong
+ON [KhachHang]
+AFTER UPDATE
+AS
+BEGIN
+    PRINT N'Trigger A đang chạy... cập nhật bảng SanBong';
+    UPDATE [SanBong] SET [LoaiSan] = [LoaiSan] WHERE [MaSanBong] = 1;
+END;
+GO
+```
+<img width="960" height="600" alt="image" src="https://github.com/user-attachments/assets/59f31bb1-38b2-414d-9878-84209c461b5e" />
+
+**Bước B**: Tạo Trigger trên bảng SanBong (Cập nhật ngược lại KhachHang)
+```sql
+GO
+CREATE TRIGGER trg_SanBong_To_KhachHang
+ON [SanBong]
+AFTER UPDATE
+AS
+BEGIN
+    PRINT N'Trigger B đang chạy... cập nhật ngược lại bảng KhachHang';
+    UPDATE [KhachHang] SET [HoTenKhachHang] = [HoTenKhachHang] WHERE [MaKhachHang] = 1;
+END;
+GO
+```
+<img width="960" height="600" alt="image" src="https://github.com/user-attachments/assets/821679d8-3991-4dcb-af43-edf0edf6dc37" />
+
+**Bước C**: Kích hoạt tình trạng lỗi
+Chạy lệnh này và quan sát tab Messages:
+```sql
+UPDATE [KhachHang] SET [DiemTichLuy] = 100 WHERE [MaKhachHang] = 1;
+```
+
+<img width="960" height="600" alt="image" src="https://github.com/user-attachments/assets/1f3c02a9-0198-4d01-8438-7c9f61bcea79" />
+
+#### Quan sát và Nhận xét
+- Hiện tượng quan sát được:
+Khi bạn chạy lệnh Update ở Bước C, hệ thống sẽ hiện ra một loạt thông báo lặp đi lặp lại:
+
+Trigger A đang chạy...
+
+Trigger B đang chạy...
+
+...
+
+Cuối cùng, một thông báo lỗi màu đỏ xuất hiện: "Maximum stored procedure, function, trigger, or view nesting level exceeded (limit 32)."
+
+#### Giải thích thông báo:
+- Nesting level exceeded: SQL Server có một cơ chế bảo vệ, nó chỉ cho phép các lệnh gọi nhau tối đa 32 tầng.
+
+- Khi Trigger A kích hoạt Trigger B, và B lại kích hoạt ngược lại A, nó tạo thành một cái "vòng lặp vô tận" (Infinite Loop). Hệ thống phát hiện ra việc này sẽ tự động ngắt lệnh để tránh làm treo máy chủ (tràn bộ nhớ).
+
+#### Nhật xét cuối cùng:
+- Tính nguy hiểm: Tình trạng này được gọi là Indirect Recursion (Đệ quy gián tiếp). Nó cực kỳ nguy hiểm vì có thể gây treo hệ thống hoặc làm sai lệch dữ liệu hàng loạt nếu không có giới hạn 32 tầng của SQL Server.
+
+- Kinh nghiệm thiết kế: Khi viết Trigger, tuyệt đối tránh việc cập nhật chéo giữa các bảng theo vòng tròn. Nếu cần cập nhật nhiều bảng, nên sử dụng Store Procedure để kiểm soát luồng dữ liệu thay vì dùng Trigger chồng chéo.
